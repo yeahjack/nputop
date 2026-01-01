@@ -49,7 +49,7 @@ _POWER_LIMIT = {
 }
 _npu_chip_phy : dict[tuple[int, int], int] = {} # (npu id, chip_id) ↦ phy id
 # --------- Regex ----------
-_RE_L1 = re.compile(r"^\|\s*(\d+)\s+(\S+).*?\|\s*(\S+)\s+\|\s*([\d.]+|-)\s+(\d+)")
+_RE_L1 = re.compile(r"^\|\s*(\d+)\s+(\S+).*?\|\s*(\S+)\s+\|\s*(\S+)\s+(\d+)")
 _RE_L2 = re.compile(r"^\|\s*(\d+)\s+(\d*)\s*\|\s*([0-9A-Fa-f:.]+|NA)\s*\|\s*(\d+).*?\|$")
 _RE_P  = re.compile(r"^\|\s*(\d+)\s+(\d+)\s+\|\s+(\d+)\s+\|.*?\|\s+(\d+)")
 _RE_R = re.compile(r"^\|\s*(\S+)\s+([\d.rcRC]+)\s+Version:\s*([\d.rcRC]+)")
@@ -88,7 +88,7 @@ def _update_cache(raw: str = None) -> None:
             
             ln1_data = dict(
                 name=name, health=ok,
-                power=float(pwr) * 1000 if pwr != '-' else NA + " ",
+                power=float(pwr) * 1000 if (pwr != '-' and pwr != "NA") else NA + " ",
                 temp=int(tmp),
                 procs=[],
                 npu_id=cur_id,
