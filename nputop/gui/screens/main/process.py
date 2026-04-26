@@ -5,12 +5,8 @@
 # pylint: disable=missing-module-docstring,missing-class-docstring,missing-function-docstring
 
 import itertools
-import threading
-import time
 from operator import attrgetter, xor
 from typing import Any, Callable, NamedTuple
-
-from cachetools.func import ttl_cache
 
 from nputop.gui.library import (
     HOSTNAME,
@@ -139,15 +135,9 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
         self.reverse = False
 
         self.has_snapshots = False
-        self._snapshot_buffer = None
         self._snapshots = []
-        self.snapshot_lock = threading.Lock()
-        self._snapshot_daemon = threading.Thread(
-            name='process-snapshot-daemon',
-            target=self._snapshot_target,
-            daemon=True,
-        )
-        self._daemon_running = threading.Event()
+        self._snapshot_generation = 0
+        self._formatted_snapshot_cache = []
 
     @property
     def width(self):
@@ -217,18 +207,17 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
         snapshots.sort(key=key, reverse=xor(reverse, self.reverse))
 
         old_host_offset = self.host_offset
-        with self.snapshot_lock:
-            self.need_redraw = (
-                self.need_redraw or self.height > height or self.host_headers[-2] != time_header
-            )
-            self._snapshots = snapshots
+        self.need_redraw = (
+            self.need_redraw or self.height > height or self.host_headers[-2] != time_header
+        )
+        self._snapshots = snapshots
 
-            self.host_headers[-2] = time_header
-            self.height = height
-            self.host_offset = max(
-                -1,
-                min(self.host_offset, info_length - self.width + self.HOST_COLUMN + 1),
-            )
+        self.host_headers[-2] = time_header
+        self.height = height
+        self.host_offset = max(
+            -1,
+            min(self.host_offset, info_length - self.width + self.HOST_COLUMN + 1),
+        )
 
         if old_host_offset not in {self.host_offset, LARGE_INTEGER}:
             self.beep()
@@ -246,19 +235,24 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
     def set_snapshot_interval(cls, interval):
         assert interval > 0.0
         interval = float(interval)
-
         cls.SNAPSHOT_INTERVAL = min(interval / 3.0, 1.0)
-        cls.take_snapshots = ttl_cache(ttl=interval)(
-            cls.take_snapshots.__wrapped__,  # pylint: disable=no-member
-        )
 
     def ensure_snapshots(self):
         if not self.has_snapshots:
             self.snapshots = self.take_snapshots()
 
-    @ttl_cache(ttl=2.0)
     def take_snapshots(self):
-        snapshots = NpuProcess.take_snapshots(self.processes, failsafe=True)
+        service = getattr(self.root, 'snapshot_service', None)
+        if service is not None and hasattr(service, 'snapshot'):
+            bundle = service.snapshot(ensure=True)
+            if bundle.generation == getattr(self, '_snapshot_generation', 0):
+                return list(getattr(self, '_formatted_snapshot_cache', []))
+            self._snapshot_generation = bundle.generation
+            snapshots = list(bundle.processes)
+        elif service is not None:
+            snapshots = service.process_snapshots(ensure=True)
+        else:
+            snapshots = NpuProcess.take_snapshots(self.processes, failsafe=True)
         for condition in self.filters:
             snapshots = filter(condition, snapshots)
         snapshots = list(snapshots)
@@ -275,16 +269,8 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                 ),
             )
 
-        with self.snapshot_lock:
-            self._snapshot_buffer = snapshots
-
+        self._formatted_snapshot_cache = list(snapshots)
         return snapshots
-
-    def _snapshot_target(self):
-        self._daemon_running.wait()
-        while self._daemon_running.is_set():
-            self.take_snapshots()
-            time.sleep(self.SNAPSHOT_INTERVAL)
 
     def header_lines(self):
         header = [
@@ -318,11 +304,7 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
             return True
 
     def poke(self):
-        if not self._daemon_running.is_set():
-            self._daemon_running.set()
-            self._snapshot_daemon.start()
-
-        self.snapshots = self._snapshot_buffer
+        self.snapshots = self.take_snapshots()
 
         self.selection.within_window = False
         if len(self.snapshots) > 0 and self.selection.is_set():
@@ -586,7 +568,6 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
 
     def destroy(self):
         super().destroy()
-        self._daemon_running.clear()
 
     def print_width(self):
         self.ensure_snapshots()

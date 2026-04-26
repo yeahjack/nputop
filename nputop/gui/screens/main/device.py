@@ -4,10 +4,7 @@
 
 # pylint: disable=missing-module-docstring,missing-class-docstring,missing-function-docstring
 
-import threading
 import time
-
-from cachetools.func import ttl_cache
 
 from nputop.gui.library import NA, Device, Displayable, colored, cut_string, host, make_bar
 from nputop.version import __version__
@@ -56,16 +53,9 @@ class DevicePanel(Displayable):  # pylint: disable=too-many-instance-attributes
         self.driver_version = Device.driver_version()
         self.cuda_driver_version = Device.cuda_driver_version()
 
-        self._snapshot_buffer = []
         self._snapshots = []
-        self.snapshot_lock = threading.Lock()
+        self._snapshot_generation = 0
         self.snapshots = self.take_snapshots()
-        self._snapshot_daemon = threading.Thread(
-            name='device-snapshot-daemon',
-            target=self._snapshot_target,
-            daemon=True,
-        )
-        self._daemon_running = threading.Event()
 
         self.formats_compact = [
             '│ {physical_index:>3} {fan_speed_string:>3} {temperature_string:>4} '
@@ -124,24 +114,32 @@ class DevicePanel(Displayable):  # pylint: disable=too-many-instance-attributes
 
     @snapshots.setter
     def snapshots(self, snapshots):
-        with self.snapshot_lock:
-            self._snapshots = snapshots
+        self._snapshots = snapshots
 
     @classmethod
     def set_snapshot_interval(cls, interval):
         assert interval > 0.0
         interval = float(interval)
-
         cls.SNAPSHOT_INTERVAL = min(interval / 3.0, 1.0)
-        cls.take_snapshots = ttl_cache(ttl=interval)(
-            cls.take_snapshots.__wrapped__,  # pylint: disable=no-member
-        )
 
-    @ttl_cache(ttl=1.0)
     def take_snapshots(self):
-        snapshots = [device.as_snapshot() for device in self.all_devices]
+        service = getattr(self.root, 'snapshot_service', None)
+        if service is not None:
+            bundle = service.snapshot(ensure=True)
+            if bundle.generation == self._snapshot_generation and self._snapshots:
+                return list(self._snapshots)
+            self._snapshot_generation = bundle.generation
+            snapshots = list(bundle.devices)
+        else:
+            snapshots = [device.as_snapshot() for device in self.all_devices]
 
+        return self._format_snapshots(snapshots)
+
+    @staticmethod
+    def _format_snapshots(snapshots):
         for device in snapshots:
+            if getattr(device, '_nputop_formatted', False):
+                continue
             if device.name.startswith('NVIDIA '):
                 device.name = device.name.replace('NVIDIA ', '', 1)
             if device.is_mig_device:
@@ -167,17 +165,15 @@ class DevicePanel(Displayable):  # pylint: disable=too-many-instance-attributes
                 device.compute_mode = device.compute_mode.replace('Exclusive', 'E.')
                 if device.fan_speed != NA and device.fan_speed >= 100:
                     device.fan_speed_string = 'MAX'
-
-        with self.snapshot_lock:
-            self._snapshot_buffer = snapshots
+            device._nputop_formatted = True
 
         return snapshots
 
-    def _snapshot_target(self):
-        self._daemon_running.wait()
-        while self._daemon_running.is_set():
-            self.take_snapshots()
-            time.sleep(self.SNAPSHOT_INTERVAL)
+    def sampling_status_text(self):
+        service = getattr(self.root, 'snapshot_service', None)
+        if service is None:
+            return ''
+        return service.status_text()
 
     def header_lines(self, compact=None):
         if compact is None:
@@ -188,13 +184,17 @@ class DevicePanel(Displayable):  # pylint: disable=too-many-instance-attributes
             f'Driver Version: {self.driver_version}',
             f'CANN Version: {self.cuda_driver_version}',
         ]
-        if sum(len(v) for v in version_infos) % 2 == 0:
-            version_infos[0] += ' '
-        version_seps = ' ' * max(2, (75 - sum(len(v) for v in version_infos)) // 2)
+        version_content = '  '.join(version_infos)
+        status_text = self.sampling_status_text()
+        if status_text:
+            remaining = 75 - len(version_content) - 2
+            if remaining >= 12:
+                version_content += '  ' + cut_string(status_text, maxlen=remaining, padstr='..')
+        version_content = cut_string(version_content, maxlen=75, padstr='..').center(75)
 
         header = [
             '╒═════════════════════════════════════════════════════════════════════════════╕',
-            '│ {} │'.format(version_seps.join(version_infos).ljust(75, ' ')),
+            f'│ {version_content} │',
         ]
         if self.device_count > 0:
             header.append(
@@ -267,11 +267,7 @@ class DevicePanel(Displayable):  # pylint: disable=too-many-instance-attributes
         return frame
 
     def poke(self):
-        if not self._daemon_running.is_set():
-            self._daemon_running.set()
-            self._snapshot_daemon.start()
-
-        self.snapshots = self._snapshot_buffer
+        self.snapshots = self.take_snapshots()
 
         super().poke()
 
@@ -398,7 +394,6 @@ class DevicePanel(Displayable):  # pylint: disable=too-many-instance-attributes
 
     def destroy(self):
         super().destroy()
-        self._daemon_running.clear()
 
     def print_width(self):
         if self.device_count > 0 and self.width >= 100:

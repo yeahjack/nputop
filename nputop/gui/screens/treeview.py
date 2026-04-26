@@ -4,13 +4,9 @@
 
 # pylint: disable=missing-module-docstring,missing-class-docstring,missing-function-docstring
 
-import threading
-import time
 from collections import deque
 from functools import partial
 from itertools import islice
-
-from cachetools.func import ttl_cache
 
 from nputop.gui.library import (
     NA,
@@ -226,15 +222,8 @@ class TreeViewScreen(Displayable):  # pylint: disable=too-many-instance-attribut
         self.x_offset = 0
         self.y_mouse = None
 
-        self._snapshot_buffer = []
         self._snapshots = []
-        self.snapshot_lock = threading.Lock()
-        self._snapshot_daemon = threading.Thread(
-            name='treeview-snapshot-daemon',
-            target=self._snapshot_target,
-            daemon=True,
-        )
-        self._daemon_running = threading.Event()
+        self._snapshot_generation = 0
 
         self.x, self.y = root.x, root.y
         self.scroll_offset = 0
@@ -254,14 +243,8 @@ class TreeViewScreen(Displayable):  # pylint: disable=too-many-instance-attribut
             self.need_redraw = True
             self._visible = value
         if self.visible:
-            self._daemon_running.set()
-            try:
-                self._snapshot_daemon.start()
-            except RuntimeError:
-                pass
             self.snapshots = self.take_snapshots()
         else:
-            self._daemon_running.clear()
             self.focused = False
 
     @property
@@ -270,9 +253,8 @@ class TreeViewScreen(Displayable):  # pylint: disable=too-many-instance-attribut
 
     @snapshots.setter
     def snapshots(self, snapshots):
-        with self.snapshot_lock:
-            self.need_redraw = self.need_redraw or len(self._snapshots) > len(snapshots)
-            self._snapshots = snapshots
+        self.need_redraw = self.need_redraw or len(self._snapshots) > len(snapshots)
+        self._snapshots = snapshots
 
         if self.selection.is_set():
             identity = self.selection.identity
@@ -287,18 +269,18 @@ class TreeViewScreen(Displayable):  # pylint: disable=too-many-instance-attribut
     def set_snapshot_interval(cls, interval):
         assert interval > 0.0
         interval = float(interval)
-
         cls.SNAPSHOT_INTERVAL = min(interval / 3.0, 1.0)
-        cls.take_snapshots = ttl_cache(ttl=interval)(
-            cls.take_snapshots.__wrapped__,  # pylint: disable=no-member
-        )
 
-    @ttl_cache(ttl=2.0)
     def take_snapshots(self):
+        service = getattr(self.root, 'snapshot_service', None)
+        generation = None
+        if service is not None:
+            generation = service.snapshot(ensure=True).generation
+            if generation == self._snapshot_generation and self._snapshots:
+                return list(self._snapshots)
+
         self.root.main_screen.process_panel.ensure_snapshots()
-        snapshots = (
-            self.root.main_screen.process_panel._snapshot_buffer  # pylint: disable=protected-access
-        )
+        snapshots = self.root.main_screen.process_panel.snapshots
 
         roots = TreeNode.merge(snapshots)
         roots = TreeNode.freeze(roots)
@@ -318,16 +300,9 @@ class TreeViewScreen(Displayable):  # pylint: disable=too-many-instance-attribut
                 snapshot.devices = 'Host'
             snapshots.append(snapshot)
 
-        with self.snapshot_lock:
-            self._snapshot_buffer = snapshots
-
+        if generation is not None:
+            self._snapshot_generation = generation
         return snapshots
-
-    def _snapshot_target(self):
-        while True:
-            self._daemon_running.wait()
-            self.take_snapshots()
-            time.sleep(self.SNAPSHOT_INTERVAL)
 
     def update_size(self, termsize=None):
         n_term_lines, n_term_cols = termsize = super().update_size(termsize=termsize)
@@ -338,8 +313,8 @@ class TreeViewScreen(Displayable):  # pylint: disable=too-many-instance-attribut
         return termsize
 
     def poke(self):
-        if self._daemon_running.is_set():
-            self.snapshots = self._snapshot_buffer
+        if self.visible:
+            self.snapshots = self.take_snapshots()
 
         self.selection.within_window = False
         if len(self.snapshots) > 0 and self.selection.is_set():
@@ -540,7 +515,6 @@ class TreeViewScreen(Displayable):  # pylint: disable=too-many-instance-attribut
 
     def destroy(self):
         super().destroy()
-        self._daemon_running.clear()
 
     def press(self, key):
         self.root.keymaps.use_keymap('treeview')

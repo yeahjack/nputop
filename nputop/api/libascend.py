@@ -359,6 +359,11 @@ def ascendGetCacheStats() -> CacheStats:
             cache_size=len(_IDX),
         )
 
+def ascendInvalidateCache() -> None:
+    global _cache_ts
+    with _CACHE_LOCK:
+        _cache_ts = 0.0
+
 def nvmlCheckReturn(v:Any, t:type|tuple[type,...]|None=None)->bool:
     return v != NA and (isinstance(v,t) if t else True)
 

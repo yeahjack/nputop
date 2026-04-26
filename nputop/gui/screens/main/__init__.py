@@ -174,6 +174,7 @@ class MainScreen(DisplayableContainer):  # pylint: disable=too-many-instance-att
             self.root.update_size()
 
         def force_refresh():
+            self.root.snapshot_service.request_refresh()
             select_clear()
             host_begin()
             self.y = self.root.y

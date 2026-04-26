@@ -17,6 +17,7 @@ from nputop.gui.screens import (
     ProcessMetricsScreen,
     TreeViewScreen,
 )
+from nputop.gui.snapshot import SnapshotService
 
 
 class UI(DisplayableContainer):  # pylint: disable=too-many-instance-attributes
@@ -43,6 +44,7 @@ class UI(DisplayableContainer):  # pylint: disable=too-many-instance-attributes
 
         self.devices = devices
         self.device_count = len(self.devices)
+        self.snapshot_service = SnapshotService(self.devices, interval=interval)
 
         self.main_screen = MainScreen(
             self.devices,
@@ -81,18 +83,14 @@ class UI(DisplayableContainer):  # pylint: disable=too-many-instance-attributes
             self.add_child(self.help_screen)
 
             if interval is not None:
-                if interval < 1.0:
-                    self.main_screen.device_panel.set_snapshot_interval(interval)
-                    self.main_screen.host_panel.set_snapshot_interval(interval)
-                if interval < 0.5:
-                    self.process_metrics_screen.set_snapshot_interval(interval)
-                self.main_screen.process_panel.set_snapshot_interval(interval)
-                self.treeview_screen.set_snapshot_interval(interval)
+                self.snapshot_service.set_interval(interval)
 
             self.keybuffer = KeyBuffer()
             self.keymaps = KeyMaps(self.keybuffer)
             self.last_input_time = time.monotonic()
             self.init_keybindings()
+            self.snapshot_service.collect()
+            self.snapshot_service.start()
 
     @property
     def messagebox(self):
@@ -189,6 +187,10 @@ class UI(DisplayableContainer):  # pylint: disable=too-many-instance-attributes
         self.poke()
         self.draw()
         self.finalize()
+
+    def destroy(self):
+        self.snapshot_service.stop()
+        super().destroy()
 
     def loop(self):
         if self.win is None:

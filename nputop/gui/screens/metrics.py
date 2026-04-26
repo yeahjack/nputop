@@ -7,7 +7,6 @@
 
 import itertools
 import threading
-import time
 from collections import OrderedDict
 
 from nputop.gui.library import (
@@ -93,12 +92,7 @@ class ProcessMetricsScreen(Displayable):  # pylint: disable=too-many-instance-at
 
         self.enabled = False
         self.snapshot_lock = threading.Lock()
-        self._snapshot_daemon = threading.Thread(
-            name='process-metrics-snapshot-daemon',
-            target=self._snapshot_target,
-            daemon=True,
-        )
-        self._daemon_running = threading.Event()
+        self._last_snapshot_generation = 0
 
         self.x, self.y = root.x, root.y
         self.width, self.height = root.width, root.height
@@ -117,11 +111,6 @@ class ProcessMetricsScreen(Displayable):  # pylint: disable=too-many-instance-at
             self.need_redraw = True
             self._visible = value
         if self.visible:
-            self._daemon_running.set()
-            try:
-                self._snapshot_daemon.start()
-            except RuntimeError:
-                pass
             self.take_snapshots()
         else:
             self.focused = False
@@ -242,19 +231,14 @@ class ProcessMetricsScreen(Displayable):  # pylint: disable=too-many-instance-at
             self.used_npu_memory.scale = 1.0
             self.npu_sm_utilization.scale = 1.0
 
-            self._daemon_running.set()
-            try:
-                self._snapshot_daemon.start()
-            except RuntimeError:
-                pass
             self.enabled = True
+            self._last_snapshot_generation = 0
 
         self.take_snapshots()
         self.update_size()
 
     def disable(self):
         with self.snapshot_lock:
-            self._daemon_running.clear()
             self.enabled = False
             self.cpu_percent = None
             self.used_host_memory = None
@@ -274,7 +258,6 @@ class ProcessMetricsScreen(Displayable):  # pylint: disable=too-many-instance-at
     def set_snapshot_interval(cls, interval):
         assert interval > 0.0
         interval = float(interval)
-
         cls.SNAPSHOT_INTERVAL = min(interval / 3.0, 1.0)
 
     def take_snapshots(self):
@@ -282,21 +265,25 @@ class ProcessMetricsScreen(Displayable):  # pylint: disable=too-many-instance-at
             if not self.selection.is_set() or not self.enabled:
                 return
 
-            with NpuProcess.failsafe():
-                self.process.device.as_snapshot()
-                self.process.update_npu_status()
-                snapshot = self.process.as_snapshot()
+            service = getattr(self.root, 'snapshot_service', None)
+            if service is not None:
+                bundle = service.snapshot(ensure=True)
+                if bundle.generation == self._last_snapshot_generation:
+                    return
+                snapshot = service.process_snapshot_for(self.process)
+                if snapshot is None:
+                    snapshot = self.process.snapshot
+                self._last_snapshot_generation = bundle.generation
+            else:
+                with NpuProcess.failsafe():
+                    self.process.device.as_snapshot()
+                    self.process.update_npu_status()
+                    snapshot = self.process.as_snapshot()
 
-                self.cpu_percent.add(snapshot.cpu_percent)
-                self.used_host_memory.add(snapshot.host_memory)
-                self.used_npu_memory.add(snapshot.npu_memory)
-                self.npu_sm_utilization.add(snapshot.npu_sm_utilization)
-
-    def _snapshot_target(self):
-        while True:
-            self._daemon_running.wait()
-            self.take_snapshots()
-            time.sleep(self.SNAPSHOT_INTERVAL)
+            self.cpu_percent.add(snapshot.cpu_percent)
+            self.used_host_memory.add(snapshot.host_memory)
+            self.used_npu_memory.add(snapshot.npu_memory)
+            self.npu_sm_utilization.add(snapshot.npu_sm_utilization)
 
     def update_size(self, termsize=None):
         n_term_lines, n_term_cols = termsize = super().update_size(termsize=termsize)
@@ -334,12 +321,7 @@ class ProcessMetricsScreen(Displayable):  # pylint: disable=too-many-instance-at
         ]
 
     def poke(self):
-        if self.visible and not self._daemon_running.is_set():
-            self._daemon_running.set()
-            try:
-                self._snapshot_daemon.start()
-            except RuntimeError:
-                pass
+        if self.visible:
             self.take_snapshots()
 
         super().poke()
@@ -592,7 +574,6 @@ class ProcessMetricsScreen(Displayable):  # pylint: disable=too-many-instance-at
 
     def destroy(self):
         super().destroy()
-        self._daemon_running.clear()
 
     def press(self, key):
         self.root.keymaps.use_keymap('process-metrics')

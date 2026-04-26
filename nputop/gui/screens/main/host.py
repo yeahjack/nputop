@@ -4,9 +4,6 @@
 
 # pylint: disable=missing-module-docstring,missing-class-docstring,missing-function-docstring
 
-import threading
-import time
-
 from nputop.gui.library import (
     NA,
     BufferedHistoryGraph,
@@ -46,12 +43,7 @@ class HostPanel(Displayable):  # pylint: disable=too-many-instance-attributes
         self.load_average = None
         self.virtual_memory = None
         self.swap_memory = None
-        self._snapshot_daemon = threading.Thread(
-            name='host-snapshot-daemon',
-            target=self._snapshot_target,
-            daemon=True,
-        )
-        self._daemon_running = threading.Event()
+        self._snapshot_generation = 0
 
     @property
     def width(self):
@@ -170,18 +162,41 @@ class HostPanel(Displayable):  # pylint: disable=too-many-instance-attributes
     def set_snapshot_interval(cls, interval):
         assert interval > 0.0
         interval = float(interval)
-
         cls.SNAPSHOT_INTERVAL = min(interval / 3.0, 0.5)
 
     def take_snapshots(self):
-        host.cpu_percent()
-        host.virtual_memory()
-        host.swap_memory()
-        self.load_average = host.load_average()
+        service = getattr(self.root, 'snapshot_service', None)
+        if service is None:
+            cpu_percent = host.cpu_percent()
+            virtual_memory = host.virtual_memory()
+            swap_memory = host.swap_memory()
+            self.load_average = host.load_average()
+        else:
+            bundle = service.snapshot(ensure=True)
+            if bundle.generation == self._snapshot_generation and self.virtual_memory is not None:
+                return
+            self._snapshot_generation = bundle.generation
+            host_sample = bundle.host
+            cpu_percent = host_sample.cpu_percent
+            virtual_memory = host_sample.virtual_memory
+            swap_memory = host_sample.swap_memory
+            self.load_average = host_sample.load_average
 
-        self.cpu_percent = host.cpu_percent.history.last_value
-        self.virtual_memory = host.virtual_memory.history.last_retval
-        self.swap_memory = host.swap_memory.history.last_retval
+        self.cpu_percent = getattr(
+            getattr(host.cpu_percent, 'history', None),
+            'last_value',
+            cpu_percent,
+        )
+        self.virtual_memory = getattr(
+            getattr(host.virtual_memory, 'history', None),
+            'last_retval',
+            virtual_memory,
+        )
+        self.swap_memory = getattr(
+            getattr(host.swap_memory, 'history', None),
+            'last_retval',
+            swap_memory,
+        )
 
         total_memory_used = 0
         total_memory_total = 0
@@ -199,12 +214,6 @@ class HostPanel(Displayable):  # pylint: disable=too-many-instance-attributes
             self.average_npu_memory_percent.add(100.0 * total_memory_used / total_memory_total)
         if len(npu_utilizations) > 0:
             self.average_npu_utilization.add(sum(npu_utilizations) / len(npu_utilizations))
-
-    def _snapshot_target(self):
-        self._daemon_running.wait()
-        while self._daemon_running.is_set():
-            self.take_snapshots()
-            time.sleep(self.SNAPSHOT_INTERVAL)
 
     def frame_lines(self, compact=None):
         if compact is None:
@@ -245,10 +254,7 @@ class HostPanel(Displayable):  # pylint: disable=too-many-instance-attributes
         return frame
 
     def poke(self):
-        if not self._daemon_running.is_set():
-            self._daemon_running.set()
-            self._snapshot_daemon.start()
-            self.take_snapshots()
+        self.take_snapshots()
 
         super().poke()
 
@@ -380,7 +386,6 @@ class HostPanel(Displayable):  # pylint: disable=too-many-instance-attributes
 
     def destroy(self):
         super().destroy()
-        self._daemon_running.clear()
 
     def print_width(self):
         if self.device_count > 0 and self.width >= 100:
