@@ -147,10 +147,7 @@ class EnvironScreen(Displayable):  # pylint: disable=too-many-instance-attribute
         self.color_reset()
 
         if isinstance(self.process, NpuProcess):
-            process_type = 'NPU: ' + self.process.type.replace('C', 'Compute').replace(
-                'G',
-                'Graphics',
-            )
+            process_type = f'NPU {self.process.device.display_index}'
         else:
             process_type = 'Host'
         header_prefix = WideString(

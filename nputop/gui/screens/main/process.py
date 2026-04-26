@@ -37,11 +37,13 @@ class Order(NamedTuple):
     column: str
     previous: str
     next: str
+    bind_key: str
 
 
 class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
     NAME = 'process'
     SNAPSHOT_INTERVAL = 0.5
+    HOST_COLUMN = 32
 
     ORDERS = {
         'natural': Order(
@@ -51,6 +53,7 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
             column='ID',
             previous='time',
             next='pid',
+            bind_key='n',
         ),
         'pid': Order(
             key=attrgetter('_gone', 'pid', 'device.tuple_index'),
@@ -59,68 +62,58 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
             column='PID',
             previous='natural',
             next='username',
+            bind_key='p',
         ),
         'username': Order(
             key=attrgetter('_gone', 'username', 'pid', 'device.tuple_index'),
             reverse=False,
-            offset=19,
+            offset=17,
             column='USER',
             previous='pid',
             next='npu_memory',
+            bind_key='u',
         ),
         'npu_memory': Order(
             key=attrgetter(
                 '_gone',
                 'npu_memory',
-                'npu_sm_utilization',
                 'cpu_percent',
                 'pid',
                 'device.tuple_index',
             ),
             reverse=True,
-            offset=25,
+            offset=23,
             column='NPU-MEM',
             previous='username',
-            next='sm_utilization',
-        ),
-        'sm_utilization': Order(
-            key=attrgetter(
-                '_gone',
-                'npu_sm_utilization',
-                'npu_memory',
-                'cpu_percent',
-                'pid',
-                'device.tuple_index',
-            ),
-            reverse=True,
-            offset=34,
-            column='SM',
-            previous='npu_memory',
             next='cpu_percent',
+            bind_key='g',
         ),
         'cpu_percent': Order(
             key=attrgetter('_gone', 'cpu_percent', 'memory_percent', 'pid', 'device.tuple_index'),
             reverse=True,
-            offset=38,
+            offset=32,
             column='%CPU',
-            previous='sm_utilization',
+            previous='npu_memory',
             next='memory_percent',
+            bind_key='c',
         ),
         'memory_percent': Order(
             key=attrgetter('_gone', 'memory_percent', 'cpu_percent', 'pid', 'device.tuple_index'),
             reverse=True,
-            offset=44,
+            offset=38,
             column='%MEM',
             previous='cpu_percent',
             next='time',
+            bind_key='m',
         ),
         'time': Order(
             key=attrgetter('_gone', 'running_time', 'pid', 'device.tuple_index'),
             reverse=True,
-            offset=50,
+            offset=44,
             column='TIME',
             previous='memory_percent',
             next='natural',
+            bind_key='t',
         ),
     }
 
@@ -232,7 +225,10 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
 
             self.host_headers[-2] = time_header
             self.height = height
-            self.host_offset = max(-1, min(self.host_offset, info_length - self.width + 39))
+            self.host_offset = max(
+                -1,
+                min(self.host_offset, info_length - self.width + self.HOST_COLUMN + 1),
+            )
 
         if old_host_offset not in {self.host_offset, LARGE_INTEGER}:
             self.beep()
@@ -294,8 +290,8 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
         header = [
             '╒' + '═' * (self.width - 2) + '╕',
             '│ {} │'.format('Processes:'.ljust(self.width - 4)),
-            '│ NPU     PID      USER  NPU-MEM %SM  {} │'.format(
-                '  '.join(self.host_headers).ljust(self.width - 40),
+            '│ NPU     PID    USER  NPU-MEM  {} │'.format(
+                '  '.join(self.host_headers).ljust(self.width - self.HOST_COLUMN - 2),
             ),
             '╞' + '═' * (self.width - 2) + '╡',
         ]
@@ -390,18 +386,22 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                     attr='bold',
                 )
 
-        self.addstr(self.y + 3, self.x + 1, ' NPU     PID      USER  NPU-MEM %SM  ')
+        self.addstr(self.y + 3, self.x + 1, ' NPU     PID    USER  NPU-MEM  ')
         host_offset = max(self.host_offset, 0)
         command_offset = max(14 + len(self.host_headers[-2]) - host_offset, 0)
         if command_offset > 0:
             host_headers = '  '.join(self.host_headers)
             self.addstr(
                 self.y + 3,
-                self.x + 38,
-                f'{host_headers[host_offset:].ljust(self.width - 40)}',
+                self.x + self.HOST_COLUMN,
+                f'{host_headers[host_offset:].ljust(self.width - self.HOST_COLUMN - 2)}',
             )
         else:
-            self.addstr(self.y + 3, self.x + 38, '{}'.format('COMMAND'.ljust(self.width - 40)))
+            self.addstr(
+                self.y + 3,
+                self.x + self.HOST_COLUMN,
+                '{}'.format('COMMAND'.ljust(self.width - self.HOST_COLUMN - 2)),
+            )
 
         _, reverse, offset, column, *_ = self.ORDERS[self.order]
         column_width = len(column)
@@ -411,7 +411,7 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
             offset -= host_offset
             if self.order == 'time':
                 offset += len(self.host_headers[-2]) - 4
-            if offset > 38 or host_offset == 0:
+            if offset > self.HOST_COLUMN or host_offset == 0:
                 self.addstr(self.y + 3, self.x + offset - 1, column + indicator)
                 self.color_at(
                     self.y + 3,
@@ -419,16 +419,20 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                     width=column_width,
                     attr='bold | underline',
                 )
-            elif offset <= 38 < offset + column_width:
-                self.addstr(self.y + 3, self.x + 38, (column + indicator)[39 - offset :])
-                if offset + column_width >= 40:
+            elif offset <= self.HOST_COLUMN < offset + column_width:
+                self.addstr(
+                    self.y + 3,
+                    self.x + self.HOST_COLUMN,
+                    (column + indicator)[self.HOST_COLUMN + 1 - offset :],
+                )
+                if offset + column_width >= self.HOST_COLUMN + 2:
                     self.color_at(
                         self.y + 3,
-                        self.x + 38,
-                        width=offset + column_width - 39,
+                        self.x + self.HOST_COLUMN,
+                        width=offset + column_width - self.HOST_COLUMN - 1,
                         attr='bold | underline',
                     )
-            if offset + column_width >= 39:
+            if offset + column_width >= self.HOST_COLUMN + 1:
                 self.color_at(self.y + 3, self.x + offset + column_width - 1, width=1, attr='bold')
         elif self.order == 'natural' and not reverse:
             self.color_at(self.y + 3, self.x + 2, width=3, attr='bold')
@@ -483,32 +487,36 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
 
                 host_info = process.host_info
                 if self.host_offset < 0:
-                    host_info = cut_string(host_info, padstr='..', maxlen=self.width - 39)
+                    host_info = cut_string(
+                        host_info,
+                        padstr='..',
+                        maxlen=self.width - self.HOST_COLUMN - 1,
+                    )
                 else:
                     host_info = WideString(host_info)[self.host_offset :]
                 self.addstr(
                     y,
                     self.x,
-                    '│{:>4} {:>7} {} {} {:>8} {:>3} {} │'.format(
+                    '│{:>4} {:>7} {} {:>8} {} │'.format(
                         device_display_index,
                         cut_string(process.pid, maxlen=7, padstr='.'),
-                        process.type,
                         str(
                             WideString(cut_string(process.username, maxlen=7, padstr='+')).rjust(7),
                         ),
                         process.npu_memory_human,
-                        process.npu_sm_utilization_string.replace('%', ''),
-                        WideString(host_info).ljust(self.width - 39)[: self.width - 39],
+                        WideString(host_info).ljust(self.width - self.HOST_COLUMN - 1)[
+                            : self.width - self.HOST_COLUMN - 1
+                        ],
                     ),
                 )
                 if self.host_offset > 0:
-                    self.addstr(y, self.x + 37, ' ')
+                    self.addstr(y, self.x + self.HOST_COLUMN - 1, ' ')
 
                 is_zombie = process.is_zombie
                 no_permissions = process.no_permissions
                 is_gone = process.is_gone
                 if (is_zombie or no_permissions or is_gone) and command_offset == 0:
-                    self.addstr(y, self.x + 38, process.command)
+                    self.addstr(y, self.x + self.HOST_COLUMN, process.command)
 
                 if selected:
                     self.color_at(
@@ -534,9 +542,19 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                     elif not owned:
                         self.color_at(y, self.x + 5, width=self.width - 6, attr='dim')
                     if is_zombie or no_permissions:
-                        self.color_at(y, self.x + 38 + command_offset, width=14, fg='yellow')
+                        self.color_at(
+                            y,
+                            self.x + self.HOST_COLUMN + command_offset,
+                            width=14,
+                            fg='yellow',
+                        )
                     elif is_gone:
-                        self.color_at(y, self.x + 38 + command_offset, width=15, fg='red')
+                        self.color_at(
+                            y,
+                            self.x + self.HOST_COLUMN + command_offset,
+                            width=15,
+                            fg='red',
+                        )
                 y += 1
 
             if self._is_row_visible(y):
@@ -574,7 +592,10 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
         self.ensure_snapshots()
         return min(
             self.width,
-            max((39 + len(process.host_info) for process in self.snapshots), default=79),
+            max(
+                (self.HOST_COLUMN + 1 + len(process.host_info) for process in self.snapshots),
+                default=79,
+            ),
         )
 
     def print(self):
@@ -608,15 +629,19 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                     color = process.device.snapshot.display_color
                     prev_device_display_index = device_display_index
 
-                host_info = cut_string(process.host_info, padstr='..', maxlen=self.width - 39)
+                host_info = cut_string(
+                    process.host_info,
+                    padstr='..',
+                    maxlen=self.width - self.HOST_COLUMN - 1,
+                )
 
-                info = '{:>7} {} {} {:>8} {:>3} {}'.format(
+                info = '{:>7} {} {:>8} {}'.format(
                     cut_string(process.pid, maxlen=7, padstr='.'),
-                    process.type,
                     str(WideString(cut_string(process.username, maxlen=7, padstr='+')).rjust(7)),
                     process.npu_memory_human,
-                    process.npu_sm_utilization_string.replace('%', ''),
-                    WideString(host_info).ljust(self.width - 39)[: self.width - 39],
+                    WideString(host_info).ljust(self.width - self.HOST_COLUMN - 1)[
+                        : self.width - self.HOST_COLUMN - 1
+                    ],
                 )
                 if process.is_zombie or process.no_permissions or process.is_gone:
                     info = info.split(process.command)

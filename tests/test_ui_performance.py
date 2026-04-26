@@ -40,10 +40,8 @@ class FakeProcess:
     def __init__(self, pid, device, host_info, *, fail_host_info=False):
         self.pid = pid
         self.device = device
-        self.type = "N"
         self.username = "user"
         self.npu_memory_human = "1MiB"
-        self.npu_sm_utilization_string = "0%"
         self.is_zombie = False
         self.no_permissions = False
         self.is_gone = False
@@ -124,6 +122,19 @@ def test_process_panel_row_visibility_requires_min_width():
     panel._width = 78
 
     assert not panel._is_row_visible(5)
+
+
+def test_process_panel_orders_have_explicit_unique_bind_keys():
+    assert "sm_utilization" not in ProcessPanel.ORDERS
+    assert {order.bind_key for order in ProcessPanel.ORDERS.values()} == {
+        "n",
+        "p",
+        "u",
+        "g",
+        "c",
+        "m",
+        "t",
+    }
 
 
 def test_process_panel_draw_skips_invisible_process_row_formatting():
