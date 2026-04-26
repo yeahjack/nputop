@@ -315,6 +315,12 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
             itertools.chain.from_iterable(device.processes().values() for device in self.devices),
         )
 
+    def _is_row_visible(self, y):
+        try:
+            return self.root.y <= y < self.root.termsize[0] and self.width >= 79
+        except (AttributeError, TypeError):
+            return True
+
     def poke(self):
         if not self._daemon_running.is_set():
             self._daemon_running.set()
@@ -452,7 +458,8 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                 device_display_index = process.device.display_index
                 if prev_device_index != device_index:
                     if not self.compact and prev_device_index is not None:
-                        self.addstr(y, self.x, '├' + '─' * (self.width - 2) + '┤')
+                        if self._is_row_visible(y):
+                            self.addstr(y, self.x, '├' + '─' * (self.width - 2) + '┤')
                         if y == self.y_mouse:
                             self.y_mouse += 1
                         y += 1
@@ -460,6 +467,19 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                 if prev_device_display_index != device_display_index:
                     color = process.device.snapshot.display_color
                     prev_device_display_index = device_display_index
+
+                row_visible = self._is_row_visible(y)
+                if y == self.y_mouse:
+                    self.selection.process = process
+                    hint = True
+
+                selected = self.selection.is_same(process)
+                if selected:
+                    self.selection.within_window = row_visible
+
+                if not row_visible:
+                    y += 1
+                    continue
 
                 host_info = process.host_info
                 if self.host_offset < 0:
@@ -490,20 +510,13 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                 if (is_zombie or no_permissions or is_gone) and command_offset == 0:
                     self.addstr(y, self.x + 38, process.command)
 
-                if y == self.y_mouse:
-                    self.selection.process = process
-                    hint = True
-
-                if self.selection.is_same(process):
+                if selected:
                     self.color_at(
                         y,
                         self.x + 1,
                         width=self.width - 2,
                         fg='yellow' if self.selection.is_tagged(process) else 'cyan',
                         attr='bold | reverse',
-                    )
-                    self.selection.within_window = (
-                        self.root.y <= y < self.root.termsize[0] and self.width >= 79
                     )
                 else:
                     owned = str(process.username) == USERNAME or SUPERUSER
@@ -526,7 +539,8 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                         self.color_at(y, self.x + 38 + command_offset, width=15, fg='red')
                 y += 1
 
-            self.addstr(y, self.x, '╘' + '═' * (self.width - 2) + '╛')
+            if self._is_row_visible(y):
+                self.addstr(y, self.x, '╘' + '═' * (self.width - 2) + '╛')
             if not hint:
                 self.selection.clear()
 
