@@ -11,8 +11,6 @@ from nputop.version import __version__
 HELP_TEMPLATE = """nputop {} - (C) Xuehai Pan, 2021-2024.
 Released under the GNU GPLv3 License.
 
-NPU Process Type: C: Compute, G: Graphics, X: Mixed.
-
 Device coloring rules by loading intensity:
   - NPU utilization: light < {:2d}% <= moderate < {:2d}% <= heavy.
   - NPU-MEM percent: light < {:2d}% <= moderate < {:2d}% <= heavy.
@@ -59,17 +57,17 @@ class HelpScreen(Displayable):  # pylint: disable=too-many-instance-attributes
             .splitlines()
         )
         self.color_matrix = {
-            9: ('green', 'green'),
-            10: ('green', 'green'),
-            12: ('cyan', 'yellow'),
-            13: ('cyan', 'yellow'),
+            7: ('green', 'green'),
+            8: ('green', 'green'),
+            10: ('cyan', 'yellow'),
+            11: ('cyan', 'yellow'),
+            12: ('cyan', 'red'),
+            13: (None, 'red'),
             14: ('cyan', 'red'),
-            15: (None, 'red'),
-            16: ('cyan', 'red'),
-            **dict.fromkeys(range(17, 20), ('cyan', 'green')),
-            **dict.fromkeys(range(21, 23), ('blue', 'blue')),
-            **dict.fromkeys(range(24, 28), ('blue', 'blue')),
-            28: ('magenta', 'magenta'),
+            **dict.fromkeys(range(15, 18), ('cyan', 'green')),
+            **dict.fromkeys(range(19, 21), ('blue', 'blue')),
+            **dict.fromkeys(range(22, 26), ('blue', 'blue')),
+            26: ('magenta', 'magenta'),
         }
 
         self.x, self.y = root.x, root.y

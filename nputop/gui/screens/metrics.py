@@ -401,7 +401,7 @@ class ProcessMetricsScreen(Displayable):  # pylint: disable=too-many-instance-at
             columns = OrderedDict(
                 [
                     (' NPU', self.process.device.display_index.rjust(4)),
-                    ('PID  ', f'{str(process.pid).rjust(3)} {process.type}'),
+                    ('PID', str(process.pid).rjust(3)),
                     (
                         'USER',
                         WideString(

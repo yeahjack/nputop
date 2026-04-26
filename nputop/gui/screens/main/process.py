@@ -43,7 +43,7 @@ class Order(NamedTuple):
 class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
     NAME = 'process'
     SNAPSHOT_INTERVAL = 0.5
-    HOST_COLUMN = 34
+    HOST_COLUMN = 32
 
     ORDERS = {
         'natural': Order(
@@ -67,7 +67,7 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
         'username': Order(
             key=attrgetter('_gone', 'username', 'pid', 'device.tuple_index'),
             reverse=False,
-            offset=19,
+            offset=17,
             column='USER',
             previous='pid',
             next='npu_memory',
@@ -82,7 +82,7 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                 'device.tuple_index',
             ),
             reverse=True,
-            offset=25,
+            offset=23,
             column='NPU-MEM',
             previous='username',
             next='cpu_percent',
@@ -91,7 +91,7 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
         'cpu_percent': Order(
             key=attrgetter('_gone', 'cpu_percent', 'memory_percent', 'pid', 'device.tuple_index'),
             reverse=True,
-            offset=34,
+            offset=32,
             column='%CPU',
             previous='npu_memory',
             next='memory_percent',
@@ -100,7 +100,7 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
         'memory_percent': Order(
             key=attrgetter('_gone', 'memory_percent', 'cpu_percent', 'pid', 'device.tuple_index'),
             reverse=True,
-            offset=40,
+            offset=38,
             column='%MEM',
             previous='cpu_percent',
             next='time',
@@ -109,7 +109,7 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
         'time': Order(
             key=attrgetter('_gone', 'running_time', 'pid', 'device.tuple_index'),
             reverse=True,
-            offset=46,
+            offset=44,
             column='TIME',
             previous='memory_percent',
             next='natural',
@@ -290,7 +290,7 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
         header = [
             '╒' + '═' * (self.width - 2) + '╕',
             '│ {} │'.format('Processes:'.ljust(self.width - 4)),
-            '│ NPU     PID      USER  NPU-MEM  {} │'.format(
+            '│ NPU     PID    USER  NPU-MEM  {} │'.format(
                 '  '.join(self.host_headers).ljust(self.width - self.HOST_COLUMN - 2),
             ),
             '╞' + '═' * (self.width - 2) + '╡',
@@ -386,7 +386,7 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                     attr='bold',
                 )
 
-        self.addstr(self.y + 3, self.x + 1, ' NPU     PID      USER  NPU-MEM  ')
+        self.addstr(self.y + 3, self.x + 1, ' NPU     PID    USER  NPU-MEM  ')
         host_offset = max(self.host_offset, 0)
         command_offset = max(14 + len(self.host_headers[-2]) - host_offset, 0)
         if command_offset > 0:
@@ -497,10 +497,9 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                 self.addstr(
                     y,
                     self.x,
-                    '│{:>4} {:>7} {} {} {:>8} {} │'.format(
+                    '│{:>4} {:>7} {} {:>8} {} │'.format(
                         device_display_index,
                         cut_string(process.pid, maxlen=7, padstr='.'),
-                        process.type,
                         str(
                             WideString(cut_string(process.username, maxlen=7, padstr='+')).rjust(7),
                         ),
@@ -636,9 +635,8 @@ class ProcessPanel(Displayable):  # pylint: disable=too-many-instance-attributes
                     maxlen=self.width - self.HOST_COLUMN - 1,
                 )
 
-                info = '{:>7} {} {} {:>8} {}'.format(
+                info = '{:>7} {} {:>8} {}'.format(
                     cut_string(process.pid, maxlen=7, padstr='.'),
-                    process.type,
                     str(WideString(cut_string(process.username, maxlen=7, padstr='+')).rjust(7)),
                     process.npu_memory_human,
                     WideString(host_info).ljust(self.width - self.HOST_COLUMN - 1)[

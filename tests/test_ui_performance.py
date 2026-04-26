@@ -40,7 +40,6 @@ class FakeProcess:
     def __init__(self, pid, device, host_info, *, fail_host_info=False):
         self.pid = pid
         self.device = device
-        self.type = "N"
         self.username = "user"
         self.npu_memory_human = "1MiB"
         self.is_zombie = False
