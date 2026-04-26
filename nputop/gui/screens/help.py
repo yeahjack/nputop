@@ -32,10 +32,10 @@ Device coloring rules by loading intensity:
       Wheel: scroll process list        Shift-Wheel: scroll horizontally
         Tab: scroll process list         Ctrl-Wheel: fast scroll ({}x)
 
-      on oN: sort by NPU-INDEX                os oS: sort by %SM
-      op oP: sort by PID                      oc oC: sort by %CPU
-      ou oU: sort by USER                     om oM: sort by %MEM
-      og oG: sort by NPU-MEM                  ot oT: sort by TIME
+      on oN: sort by NPU-INDEX                op oP: sort by PID
+      ou oU: sort by USER                     oc oC: sort by %CPU
+      og oG: sort by NPU-MEM                  om oM: sort by %MEM
+                                                ot oT: sort by TIME
         , .: select sort column                   /: invert sort order
 
 Press any key to return.
