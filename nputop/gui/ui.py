@@ -20,6 +20,8 @@ from nputop.gui.screens import (
 
 
 class UI(DisplayableContainer):  # pylint: disable=too-many-instance-attributes
+    MAX_INPUT_EVENTS_PER_FRAME = 64
+
     # pylint: disable-next=too-many-arguments
     def __init__(
         self,
@@ -194,9 +196,9 @@ class UI(DisplayableContainer):  # pylint: disable=too-many-instance-attributes
 
         try:
             while True:
+                handled_input = self.handle_pending_inputs()
                 self.redraw()
-                self.handle_input()
-                if time.monotonic() - self.last_input_time > 1.0:
+                if not handled_input and time.monotonic() - self.last_input_time > 1.0:
                     time.sleep(0.2)
         except BreakLoop:
             pass
@@ -239,10 +241,21 @@ class UI(DisplayableContainer):  # pylint: disable=too-many-instance-attributes
             return False
         return True
 
+    def handle_pending_inputs(self, max_events=None):
+        if max_events is None:
+            max_events = self.MAX_INPUT_EVENTS_PER_FRAME
+
+        handled = False
+        for _ in range(max_events):
+            if not self.handle_input():
+                break
+            handled = True
+        return handled
+
     def handle_input(self):  # pylint: disable=too-many-branches
         key = self.win.getch()
         if key == curses.ERR:
-            return
+            return False
 
         self.last_input_time = time.monotonic()
         if key == curses.KEY_ENTER:
@@ -259,16 +272,15 @@ class UI(DisplayableContainer):  # pylint: disable=too-many-instance-attributes
             elif keys[0] == 27:
                 keys[0] = ALT_KEY
             self.handle_keys(*keys)
-            curses.flushinp()
         elif key >= 0:
             # Handle simple key presses, CTRL+X, etc here:
-            curses.flushinp()
             if key == curses.KEY_MOUSE:
                 self.handle_mouse()
             elif key == curses.KEY_RESIZE:
                 self.update_size()
             else:
                 self.handle_key(key)
+        return True
 
     def init_keybindings(self):
         # pylint: disable=multiple-statements,too-many-statements
