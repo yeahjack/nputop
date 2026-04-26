@@ -273,6 +273,11 @@ def reset_libascend_cache():
     libascend._IDX.clear()
     libascend._npu_chip_phy.clear()
     libascend._cache_ts = 0.0
+    libascend._last_update_wall_ts = 0.0
+    libascend._last_update_duration = libascend.NA
+    libascend._last_update_error = libascend.NA
+    libascend._DRIVER_VERSION = None
+    libascend._CANN_VERSION = None
 
 
 @pytest.mark.parametrize("raw,expected_cache", TEST_CASES)
@@ -302,3 +307,65 @@ def test_npusmi_parse_ignores_transient_unknown_process():
     assert libascend._IDX == [0, 1]
     assert libascend._CACHE[0]["procs"] == []
     assert libascend._CACHE[1]["procs"] == []
+
+
+def test_npusmi_cache_ttl_is_env_configurable(monkeypatch):
+    monkeypatch.setenv("NPUTOP_NPUSMI_TTL", "0.25")
+    assert libascend._cache_ttl() == 0.25
+
+    monkeypatch.setenv("NPUTOP_NPUSMI_TTL", "bad")
+    assert libascend._cache_ttl() == libascend._CACHE_TTL
+
+
+def test_npusmi_cache_timeout_is_env_configurable(monkeypatch):
+    monkeypatch.setenv("NPUTOP_NPUSMI_TIMEOUT", "1.25")
+    assert libascend._npusmi_timeout() == 1.25
+
+    monkeypatch.setenv("NPUTOP_NPUSMI_TIMEOUT", "0")
+    assert libascend._npusmi_timeout() == libascend._NPUSMI_TIMEOUT
+
+
+def test_npusmi_cache_returns_stale_frame_when_refresh_is_busy(monkeypatch):
+    reset_libascend_cache()
+    libascend._update_cache(TEST_CASES[0][0])
+    libascend._cache_ts = 0.0
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("stale cache path should not spawn npu-smi")
+
+    monkeypatch.setattr(libascend.subprocess, "run", fail_run)
+    assert libascend._CACHE_REFRESH_LOCK.acquire(blocking=False)
+    try:
+        assert libascend.ascendDeviceGetCount() == 2
+        assert libascend.ascendDeviceGetName(0) == "910B2C"
+    finally:
+        libascend._CACHE_REFRESH_LOCK.release()
+
+
+def test_npusmi_cache_keeps_stale_frame_on_failed_refresh(monkeypatch):
+    reset_libascend_cache()
+    libascend._update_cache(TEST_CASES[0][0])
+    libascend._cache_ts = 0.0
+
+    def fail_run(*args, **kwargs):
+        raise libascend.subprocess.TimeoutExpired(cmd="npu-smi info", timeout=1)
+
+    monkeypatch.setattr(libascend.subprocess, "run", fail_run)
+
+    assert libascend.ascendDeviceGetCount() == 2
+    assert libascend.ascendDeviceGetMemoryInfo(0).used == 21706571776
+    stats = libascend.ascendGetCacheStats()
+    assert stats.cache_size == 2
+    assert "TimeoutExpired" in stats.last_update_error
+
+
+def test_npusmi_cache_records_success_stats():
+    reset_libascend_cache()
+
+    libascend._update_cache(TEST_CASES[0][0])
+
+    stats = libascend.ascendGetCacheStats()
+    assert stats.cache_size == 2
+    assert stats.last_update_wall_ts > 0
+    assert stats.last_update_duration >= 0
+    assert stats.last_update_error == libascend.NA
