@@ -92,6 +92,32 @@ class Device:  # pylint: disable=too-many-instance-attributes
                 continue
         return devices
 
+    @classmethod
+    def all(cls) -> list[Device]:
+        """Return all physical Ascend devices."""
+        return cls.from_indices()
+
+    @staticmethod
+    def from_cuda_visible_devices() -> list[CudaDevice]:
+        """Return devices visible through Ascend/CUDA-compatible environment variables."""
+        visible_device_indices = Device.parse_cuda_visible_devices()
+        devices: list[CudaDevice] = []
+        for cuda_index, device_index in enumerate(visible_device_indices):
+            devices.append(CudaDevice(cuda_index, nvml_index=device_index))
+        return devices
+
+    @staticmethod
+    def parse_cuda_visible_devices(
+        cuda_visible_devices: str | None = None,
+    ) -> list[int]:
+        """Parse visible device env vars into physical Ascend device indices."""
+        return parse_cuda_visible_devices(cuda_visible_devices)
+
+    @staticmethod
+    def normalize_cuda_visible_devices(cuda_visible_devices: str | None = None) -> str:
+        """Normalize visible device env vars into stable Ascend device identifiers."""
+        return normalize_cuda_visible_devices(cuda_visible_devices)
+
     # ------------------------------------------------------------
     # 标识
     # ------------------------------------------------------------
@@ -165,6 +191,25 @@ class Device:  # pylint: disable=too-many-instance-attributes
 
     def is_mig_device(self) -> bool:
         return False
+
+    def mig_devices(self) -> list[MigDevice]:
+        return []
+
+    def is_leaf_device(self) -> bool:
+        return True
+
+    def to_leaf_devices(self) -> list[Device]:
+        return [self]
+
+    @property
+    def cuda_index(self) -> int:
+        visible_device_indices = self.parse_cuda_visible_devices()
+        try:
+            return visible_device_indices.index(self.index)
+        except ValueError as ex:
+            raise RuntimeError(
+                f'CUDA Error: Device(index={self.index}) is not visible to CUDA applications',
+            ) from ex
 
     def performance_state(self) -> str | NaType:
         return "N/A"
@@ -368,36 +413,106 @@ def list_devices() -> list[Device]:
     return [Device(i) for i in range(Device.count())]
 
 def _env_visible_devices() -> str | None:
-    return (
-        os.getenv("ASCEND_RT_VISIBLE_DEVICES")
-        or os.getenv("CUDA_VISIBLE_DEVICES")
-        or None
-    )
+    for name in ("ASCEND_RT_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"):
+        if name in os.environ:
+            return os.environ[name]
+    return None
+
+def _parse_device_identifier(identifier: str) -> int | None:
+    identifier = identifier.strip()
+    if not identifier:
+        return None
+    if identifier.isdigit():
+        return int(identifier)
+    if identifier.upper().startswith("ASCEND-"):
+        suffix = identifier.rpartition("-")[-1]
+        if suffix.isdigit():
+            return int(suffix)
+    return None
 
 def parse_cuda_visible_devices(
     cuda_visible_devices: str | None = None,
 ) -> list[int]:
     if cuda_visible_devices is None:
         cuda_visible_devices = _env_visible_devices()
-    if not cuda_visible_devices:
+    if cuda_visible_devices is None:
         return list(range(Device.count()))
+    if cuda_visible_devices == "":
+        return []
+
     ids: list[int] = []
-    for tok in cuda_visible_devices.split(","):
-        tok = tok.strip()
-        if tok.isdigit():
-            ids.append(int(tok))
+    seen: set[int] = set()
+    count = Device.count()
+    for token in cuda_visible_devices.split(","):
+        device_id = _parse_device_identifier(token)
+        if device_id is None or device_id in seen or not 0 <= device_id < count:
+            return []
+        ids.append(device_id)
+        seen.add(device_id)
     return ids
 
 def normalize_cuda_visible_devices(
     cuda_visible_devices: str | None = None,
 ) -> str:
-    return ",".join(str(i) for i in parse_cuda_visible_devices(cuda_visible_devices))
+    return ",".join(Device(i).uuid() for i in parse_cuda_visible_devices(cuda_visible_devices))
+
+
+class CudaDevice(Device):
+    """CUDA-ordinal-compatible view of an Ascend device."""
+
+    @classmethod
+    def count(cls) -> int:
+        return len(Device.parse_cuda_visible_devices())
+
+    @classmethod
+    def all(cls) -> list[CudaDevice]:
+        return cls.from_indices()
+
+    @classmethod
+    def from_indices(
+        cls,
+        indices: int | Iterable[int] | None = None,
+    ) -> list[CudaDevice]:
+        visible_devices = Device.parse_cuda_visible_devices()
+        if indices is None:
+            indices = range(len(visible_devices))
+        elif isinstance(indices, int):
+            indices = [indices]
+
+        devices: list[CudaDevice] = []
+        for cuda_index in indices:
+            if not isinstance(cuda_index, int) or not 0 <= cuda_index < len(visible_devices):
+                raise RuntimeError(f'CUDA Error: invalid device ordinal: {cuda_index!r}.')
+            devices.append(cls(cuda_index, nvml_index=visible_devices[cuda_index]))
+        return devices
+
+    def __init__(self, cuda_index: int, *, nvml_index: int | None = None) -> None:
+        visible_devices = Device.parse_cuda_visible_devices()
+        if nvml_index is None:
+            if not 0 <= cuda_index < len(visible_devices):
+                raise RuntimeError(f'CUDA Error: invalid device ordinal: {cuda_index!r}.')
+            nvml_index = visible_devices[cuda_index]
+
+        super().__init__(nvml_index)
+        self._cuda_index = cuda_index
+
+    @property
+    def cuda_index(self) -> int:
+        return self._cuda_index
+
+    def as_snapshot(self) -> Snapshot:
+        snapshot = super().as_snapshot()
+        snapshot.cuda_index = self.cuda_index
+        return snapshot
+
+
+class CudaMigDevice(CudaDevice):
+    """Ascend compatibility placeholder for CUDA MIG devices."""
 
 
 PhysicalDevice = Device
 MigDevice = Device
-CudaDevice = Device  # Ascend 没 CUDA，但保留占位
-CudaMigDevice = Device
+Device.cuda = CudaDevice
 
 __all__ = [
     "Device",

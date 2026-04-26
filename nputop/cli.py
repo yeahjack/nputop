@@ -11,6 +11,7 @@ import sys
 import textwrap
 
 from nputop.api import HostProcess
+from nputop.api import libascend as libnvml
 from nputop.gui import UI, USERNAME, Device, colored, libcurses, set_color, setlocale_utf8
 from nputop.version import __version__
 
@@ -303,7 +304,7 @@ def main() -> int:
         return 1
     except libnvml.NVMLError as ex:
         print(
-            '{} {}'.format(colored('NVML ERROR:', color='red', attrs=('bold',)), ex),
+            '{} {}'.format(colored('ASCEND ERROR:', color='red', attrs=('bold',)), ex),
             file=sys.stderr,
         )
         return 1

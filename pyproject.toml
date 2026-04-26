@@ -53,6 +53,7 @@ dynamic = ["version", "optional-dependencies"]
 
 [project.scripts]
 nputop = "nputop.cli:main"
+nvisel = "nputop.select:main"
 
 [project.urls]
 Homepage = "https://github.com/youyve/nputop"

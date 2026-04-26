@@ -61,17 +61,7 @@ def vcs_version(name: str, path: Path | str) -> Generator[ModuleType]:
             path.write_text(original, encoding="utf-8")
 
 
-with vcs_version(
-    name="nputop.version",
-    path=HERE / "nputop" / "version.py",
-) as version:
-    install_requires = [
-        "psutil>=5.6.6",
-        "cachetools>=1.0.1",
-        "termcolor>=1.0.0",
-        "nvidia-ml-py>=11.450.51,<12.561.0a0",
-    ]
-
+if __name__ == "__main__":
     extras: dict[str, list[str]] = {
         "lint": [
             "black>=24.0.0,<25.0.0a0",
@@ -81,23 +71,14 @@ with vcs_version(
             "typing-extensions",
             "pre-commit",
         ],
-        "cuda10": ["nvidia-ml-py==11.450.51"],
     }
-    
-    setup(
-        name="ascend-nputop",
-        version=version.__version__,
-        description="An interactive Ascend-NPU process viewer.",
-        author="Lianzhong You",
-        author_email="youlianzhong@gml.ac.cn",
-        python_requires=">=3.7",
-        install_requires=install_requires,
-        extras_require=extras,
-        packages=["nputop", "nputop.api", "nputop.gui", "nputop.cli"],
-        entry_points={
-            "console_scripts": [
-                "nputop = nputop.cli:main",
-                "nvisel = nputop.select:main",
-            ],
-        },
-    )
+
+    with vcs_version(
+        name="nputop.version",
+        path=HERE / "nputop" / "version.py",
+    ) as version:
+        setup(
+            name="ascend-nputop",
+            version=version.__version__,
+            extras_require=extras,
+        )
