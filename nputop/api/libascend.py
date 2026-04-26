@@ -31,6 +31,26 @@ UINT_MAX      : int  = 0xFFFFFFFF
 ULONGLONG_MAX : int  = 0xFFFFFFFFFFFFFFFF
 
 
+class NVMLError(Exception):
+    """Base exception for NVML-compatible Ascend errors."""
+
+
+class NVMLError_LibraryNotFound(NVMLError):
+    """Raised when the Ascend management backend cannot be loaded."""
+
+
+class NVMLError_DriverNotLoaded(NVMLError):
+    """Raised when the Ascend driver is not ready."""
+
+
+class NVMLError_NotFound(NVMLError):
+    """Raised when a requested device cannot be found."""
+
+
+class NVMLError_InvalidArgument(NVMLError):
+    """Raised when a requested device identifier is invalid."""
+
+
 # --------- 全局缓存 ----------
 _CACHE      : dict[int, dict[str,Any]] = {}   # 物理 id ↦ 数据
 _IDX        : list[int] = []                  # 逻辑 index ↦ 物理 id

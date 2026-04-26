@@ -29,6 +29,7 @@ import warnings
 from typing import TYPE_CHECKING, Callable, Iterable, Sequence, overload
 
 from nputop.api import Device, NpuProcess, Snapshot, colored, host, human2bytes
+from nputop.api import libascend as libnvml
 from nputop.version import __version__
 
 
@@ -511,14 +512,14 @@ def main() -> int:
         return 1
     except libnvml.NVMLError as ex:
         print(
-            '{} {}'.format(colored('NVML ERROR:', color='red', attrs=('bold',)), ex),
+            '{} {}'.format(colored('ASCEND ERROR:', color='red', attrs=('bold',)), ex),
             file=sys.stderr,
         )
         return 2
     except RuntimeError as ex:
         print(
             '{} {}'.format(
-                colored('CUDA ERROR:', color='red', attrs=('bold',)),
+                colored('NPU ERROR:', color='red', attrs=('bold',)),
                 str(ex).replace('CUDA Error: ', ''),
             ),
             file=sys.stderr,
